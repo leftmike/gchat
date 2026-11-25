@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ type fakeChat struct {
 	mu       sync.Mutex
 	email    string
 	spaces   []*chat.Space
+	dms      map[string]string
 	pageMax  int
 	failNext int
 	calls    []string
@@ -39,13 +41,19 @@ func newFakeChat(t *testing.T) *fakeChat {
 				LastActiveTime: day.Add(time.Hour).Format(time.RFC3339)},
 			{Name: "spaces/AAAAgroup01", SpaceType: "GROUP_CHAT",
 				LastActiveTime: day.Format(time.RFC3339)},
+			{Name: "spaces/AAAAproj001", DisplayName: "Project X", SpaceType: "SPACE",
+				LastActiveTime: day.Add(3 * time.Hour).Format(time.RFC3339)},
+			{Name: "spaces/AAAAproj002", DisplayName: "Project Y", SpaceType: "SPACE",
+				LastActiveTime: "1970-01-01T00:00:00Z"},
 		},
+		dms: map[string]string{"alice@example.com": "spaces/AAAAdm00001"},
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /userinfo", f.userinfo)
 	mux.HandleFunc("GET /v1/spaces", f.listSpaces)
 	mux.HandleFunc("GET /v1/spaces/{space}", f.getSpace)
+	mux.HandleFunc("GET /v1/spaces:findDirectMessage", f.findDirectMessage)
 	f.svc, f.client = newTestService(t, func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -77,6 +85,10 @@ func replyError(w http.ResponseWriter, code int, msg string) {
 
 func page[T any](f *fakeChat, w http.ResponseWriter, r *http.Request, items []T) ([]T, string, bool) {
 	q := r.URL.Query()
+	if q.Has("pageToken") && q.Get("pageToken") == "" {
+		replyError(w, http.StatusBadRequest, "empty pageToken")
+		return nil, "", false
+	}
 	size := f.pageMax
 	if s := q.Get("pageSize"); s != "" {
 		n, err := strconv.Atoi(s)
@@ -119,7 +131,16 @@ func (f *fakeChat) userinfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (f *fakeChat) listSpaces(w http.ResponseWriter, r *http.Request) {
-	spaces, next, ok := page(f, w, r, f.spaces)
+	all := f.spaces
+	if filter := r.URL.Query().Get("filter"); filter != "" {
+		all = nil
+		for _, s := range f.spaces {
+			if strings.Contains(filter, fmt.Sprintf("spaceType = %q", s.SpaceType)) {
+				all = append(all, s)
+			}
+		}
+	}
+	spaces, next, ok := page(f, w, r, all)
 	if ok {
 		reply(w, chat.ListSpacesResponse{Spaces: spaces, NextPageToken: next})
 	}
@@ -128,10 +149,24 @@ func (f *fakeChat) listSpaces(w http.ResponseWriter, r *http.Request) {
 func (f *fakeChat) getSpace(w http.ResponseWriter, r *http.Request) {
 	s := f.space("spaces/" + r.PathValue("space"))
 	if s == nil {
-		replyError(w, http.StatusNotFound, "space not found")
+		replyError(w, http.StatusForbidden, "permission denied")
 		return
 	}
 	reply(w, s)
+}
+
+func (f *fakeChat) findDirectMessage(w http.ResponseWriter, r *http.Request) {
+	email := strings.TrimPrefix(r.URL.Query().Get("name"), "users/")
+	if !strings.HasSuffix(email, "@example.com") {
+		replyError(w, http.StatusBadRequest, "Missing or malformed user resource name")
+		return
+	}
+	name, ok := f.dms[email]
+	if !ok {
+		replyError(w, http.StatusNotFound, "direct message not found")
+		return
+	}
+	reply(w, f.space(name))
 }
 
 type testRun struct {
@@ -218,12 +253,12 @@ func TestReportAuth(t *testing.T) {
 	if err := reportAuth(t.Context(), tr.config(&out, &errOut, "auth")); err != nil {
 		t.Fatal(err)
 	}
-	want := "authorized as me@example.com (3 spaces); token saved to /home/me/.gchat/token.json\n"
+	want := "authorized as me@example.com (5 spaces); token saved to /home/me/.gchat/token.json\n"
 	if out.String() != want || errOut.String() != "" {
 		t.Errorf("reportAuth: got %q, stderr %q", out.String(), errOut.String())
 	}
-	if n := strings.Count(strings.Join(tr.f.calls, "\n"), "GET /v1/spaces"); n != 2 {
-		t.Errorf("reportAuth: %d spaces.list calls, want 2: %v", n, tr.f.calls)
+	if n := strings.Count(strings.Join(tr.f.calls, "\n"), "GET /v1/spaces"); n != 3 {
+		t.Errorf("reportAuth: %d spaces.list calls, want 3: %v", n, tr.f.calls)
 	}
 }
 

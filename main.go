@@ -54,6 +54,7 @@ var (
 		"auth":   {setup: authCmd, help: "authorize gchat with Google, or revoke the saved token"},
 		"config": {setup: noFlags(showConfig), help: "show the effective configuration"},
 		"help":   {help: "show this help"},
+		"spaces": {setup: spacesCmd, help: "list spaces, group chats, and direct messages"},
 	}
 )
 

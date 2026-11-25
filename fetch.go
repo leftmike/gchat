@@ -53,6 +53,18 @@ func retryable(err error) bool {
 	return false
 }
 
+func errorCode(err error) int {
+	var gerr *googleapi.Error
+	if errors.As(err, &gerr) {
+		return gerr.Code
+	}
+	return 0
+}
+
+func notFound(err error) bool {
+	return errorCode(err) == http.StatusNotFound
+}
+
 func spaceOf(name string) string {
 	parts := strings.SplitN(name, "/", 3)
 	if len(parts) < 2 || parts[0] != "spaces" {

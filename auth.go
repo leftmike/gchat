@@ -300,24 +300,6 @@ func userEmail(ctx context.Context, client *http.Client) (string, error) {
 	return info.Email, nil
 }
 
-func countSpaces(ctx context.Context, svc *chat.Service) (int, error) {
-	n := 0
-	var pageToken string
-	for {
-		resp, err := retry(ctx, func() (*chat.ListSpacesResponse, error) {
-			return svc.Spaces.List().PageSize(maxPageSize).PageToken(pageToken).Context(ctx).Do()
-		})
-		if err != nil {
-			return 0, err
-		}
-		n += len(resp.Spaces)
-		if resp.NextPageToken == "" {
-			return n, nil
-		}
-		pageToken = resp.NextPageToken
-	}
-}
-
 func reportAuth(ctx context.Context, cfg *config) error {
 	client, err := cfg.httpClient(ctx)
 	if err != nil {
@@ -331,11 +313,11 @@ func reportAuth(ctx context.Context, cfg *config) error {
 	if err != nil {
 		return err
 	}
-	n, err := countSpaces(ctx, svc)
+	spaces, err := listSpaces(ctx, svc, "")
 	if err != nil {
 		return fmt.Errorf("listing spaces: %w", err)
 	}
-	fmt.Fprintf(cfg.out, "authorized as %s (%d spaces); token saved to %s\n", email, n, cfg.Token)
+	fmt.Fprintf(cfg.out, "authorized as %s (%d spaces); token saved to %s\n", email, len(spaces), cfg.Token)
 	return nil
 }
 
