@@ -7,18 +7,22 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 
 	"github.com/hashicorp/hcl/v2/hclsimple"
+	"google.golang.org/api/chat/v1"
 )
 
 type config struct {
 	Credentials string `hcl:"credentials,optional"`
 	Token       string `hcl:"token,optional"`
 
+	client  *http.Client
+	chat    *chat.Service
 	out     io.Writer
 	errOut  io.Writer
 	name    string
