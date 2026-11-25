@@ -104,6 +104,7 @@ func (s *savingTokenSource) Token() (*oauth2.Token, error) {
 }
 
 func (cfg *config) httpClient(ctx context.Context) (*http.Client, error) {
+	logOut = cfg.errOut
 	if cfg.client != nil {
 		return cfg.client, nil
 	}
@@ -301,11 +302,20 @@ func userEmail(ctx context.Context, client *http.Client) (string, error) {
 
 func countSpaces(ctx context.Context, svc *chat.Service) (int, error) {
 	n := 0
-	err := svc.Spaces.List().PageSize(1000).Pages(ctx, func(resp *chat.ListSpacesResponse) error {
+	var pageToken string
+	for {
+		resp, err := retry(ctx, func() (*chat.ListSpacesResponse, error) {
+			return svc.Spaces.List().PageSize(maxPageSize).PageToken(pageToken).Context(ctx).Do()
+		})
+		if err != nil {
+			return 0, err
+		}
 		n += len(resp.Spaces)
-		return nil
-	})
-	return n, err
+		if resp.NextPageToken == "" {
+			return n, nil
+		}
+		pageToken = resp.NextPageToken
+	}
 }
 
 func reportAuth(ctx context.Context, cfg *config) error {

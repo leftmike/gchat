@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,8 +14,6 @@ import (
 	"testing"
 
 	"golang.org/x/oauth2"
-	"google.golang.org/api/chat/v1"
-	"google.golang.org/api/option"
 )
 
 func TestTokenFile(t *testing.T) {
@@ -165,7 +162,7 @@ func TestReportAuth(t *testing.T) {
 		"":   `{"spaces":[{"name":"spaces/a"},{"name":"spaces/b"}],"nextPageToken":"p2"}`,
 		"p2": `{"spaces":[{"name":"spaces/c"}]}`,
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	svc, client := newTestService(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/userinfo":
 			fmt.Fprint(w, `{"email":"me@example.com"}`)
@@ -178,19 +175,14 @@ func TestReportAuth(t *testing.T) {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
-	t.Cleanup(srv.Close)
+	})
+	base := strings.TrimSuffix(svc.BasePath, "/")
 	saved := userinfoURL
-	userinfoURL = srv.URL + "/userinfo"
+	userinfoURL = base + "/userinfo"
 	t.Cleanup(func() { userinfoURL = saved })
 
-	svc, err := chat.NewService(context.Background(), option.WithEndpoint(srv.URL+"/"),
-		option.WithHTTPClient(srv.Client()))
-	if err != nil {
-		t.Fatal(err)
-	}
 	var out bytes.Buffer
-	cfg := &config{Token: "/t.json", client: srv.Client(), chat: svc, out: &out}
+	cfg := &config{Token: "/t.json", client: client, chat: svc, out: &out, errOut: io.Discard}
 	if err := reportAuth(t.Context(), cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +191,7 @@ func TestReportAuth(t *testing.T) {
 		t.Errorf("reportAuth: got %q, want %q", out.String(), want)
 	}
 
-	userinfoURL = srv.URL + "/missing"
+	userinfoURL = base + "/missing"
 	if err := reportAuth(t.Context(), cfg); err == nil || !strings.Contains(err.Error(), "404") {
 		t.Errorf("reportAuth userinfo 404: got %v", err)
 	}
