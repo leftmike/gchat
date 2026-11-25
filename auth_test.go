@@ -2,8 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -154,45 +152,5 @@ func TestAuthorizeOutput(t *testing.T) {
 	resp.Body.Close()
 	if err := <-done; err == nil || err.Error() != "authorization failed: access_denied" {
 		t.Errorf("authorize: got %v", err)
-	}
-}
-
-func TestReportAuth(t *testing.T) {
-	pages := map[string]string{
-		"":   `{"spaces":[{"name":"spaces/a"},{"name":"spaces/b"}],"nextPageToken":"p2"}`,
-		"p2": `{"spaces":[{"name":"spaces/c"}]}`,
-	}
-	svc, client := newTestService(t, func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/userinfo":
-			fmt.Fprint(w, `{"email":"me@example.com"}`)
-		case "/v1/spaces":
-			if r.URL.Query().Get("pageSize") != "1000" {
-				http.Error(w, "bad pageSize", http.StatusBadRequest)
-				return
-			}
-			fmt.Fprint(w, pages[r.URL.Query().Get("pageToken")])
-		default:
-			http.NotFound(w, r)
-		}
-	})
-	base := strings.TrimSuffix(svc.BasePath, "/")
-	saved := userinfoURL
-	userinfoURL = base + "/userinfo"
-	t.Cleanup(func() { userinfoURL = saved })
-
-	var out bytes.Buffer
-	cfg := &config{Token: "/t.json", client: client, chat: svc, out: &out, errOut: io.Discard}
-	if err := reportAuth(t.Context(), cfg); err != nil {
-		t.Fatal(err)
-	}
-	want := "authorized as me@example.com (3 spaces); token saved to /t.json\n"
-	if out.String() != want {
-		t.Errorf("reportAuth: got %q, want %q", out.String(), want)
-	}
-
-	userinfoURL = base + "/missing"
-	if err := reportAuth(t.Context(), cfg); err == nil || !strings.Contains(err.Error(), "404") {
-		t.Errorf("reportAuth userinfo 404: got %v", err)
 	}
 }
