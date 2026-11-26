@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,6 +28,7 @@ type fakeChat struct {
 	members map[string][]string
 
 	membersFail map[string]bool
+	messages    []*chat.Message
 	pageMax     int
 	failNext    int
 	calls       []string
@@ -74,6 +77,8 @@ func newFakeChat(t *testing.T) *fakeChat {
 	mux.HandleFunc("GET /v1/spaces/{space}", f.getSpace)
 	mux.HandleFunc("GET /v1/spaces:findDirectMessage", f.findDirectMessage)
 	mux.HandleFunc("GET /v1/spaces/{space}/members", f.listMembers)
+	mux.HandleFunc("GET /v1/spaces/{space}/messages", f.listMessages)
+	mux.HandleFunc("GET /v1/spaces/{space}/messages/{message}", f.getMessage)
 	f.svc, f.client = newTestService(t, func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -85,6 +90,28 @@ func newFakeChat(t *testing.T) *fakeChat {
 		}
 		mux.ServeHTTP(w, r)
 	})
+
+	msg := func(id, sender string, min int, text string, reply bool) *chat.Message {
+		thread, _, _ := strings.Cut(id, ".")
+		return &chat.Message{Name: "spaces/AAAAteam001/messages/" + id, Sender: f.users[sender],
+			CreateTime: day.Add(time.Duration(min) * time.Minute).Format(time.RFC3339Nano), Text: text,
+			Thread:      &chat.Thread{Name: "spaces/AAAAteam001/threads/" + thread},
+			ThreadReply: reply, Space: &chat.Space{Name: "spaces/AAAAteam001"}}
+	}
+	f.messages = []*chat.Message{
+		msg("T1.T1", "users/2", 0, "hello team\nsecond line", false),
+		msg("T1.r1", "users/3", 5, "hi alice", true),
+		msg("T2.T2", "users/1", 10, "", false),
+		msg("T1.r2", "users/6", 15, "late reply", true),
+		msg("T3.T3", "users/2", 20, "", false),
+	}
+	f.messages[2].Attachment = []*chat.Attachment{{ContentName: "report.pdf", ContentType: "application/pdf"}}
+	f.messages[2].EmojiReactionSummaries = []*chat.EmojiReactionSummary{
+		{Emoji: &chat.Emoji{Unicode: "👍"}, ReactionCount: 2},
+		{Emoji: &chat.Emoji{CustomEmoji: &chat.CustomEmoji{EmojiName: "shipit"}}, ReactionCount: 1}}
+	f.messages[3].LastUpdateTime = day.Add(16 * time.Minute).Format(time.RFC3339Nano)
+	f.messages[4].DeletionMetadata = &chat.DeletionMetadata{DeletionType: "CREATOR"}
+	f.messages[4].DeleteTime = day.Add(21 * time.Minute).Format(time.RFC3339Nano)
 
 	saved := userinfoURL
 	userinfoURL = strings.TrimSuffix(f.svc.BasePath, "/") + "/userinfo"
@@ -204,6 +231,65 @@ func (f *fakeChat) listMembers(w http.ResponseWriter, r *http.Request) {
 	if ok {
 		reply(w, chat.ListMembershipsResponse{Memberships: ms, NextPageToken: next})
 	}
+}
+
+var (
+	createAfter = regexp.MustCompile(`createTime > "([^"]+)"`)
+	threadIs    = regexp.MustCompile(`thread.name = (\S+)`)
+)
+
+func (f *fakeChat) listMessages(w http.ResponseWriter, r *http.Request) {
+	space := "spaces/" + r.PathValue("space")
+	if f.space(space) == nil {
+		replyError(w, http.StatusForbidden, "permission denied")
+		return
+	}
+	q := r.URL.Query()
+	filter := q.Get("filter")
+	var after time.Time
+	if m := createAfter.FindStringSubmatch(filter); m != nil {
+		var err error
+		if after, err = time.Parse(time.RFC3339, m[1]); err != nil {
+			replyError(w, http.StatusBadRequest, "bad createTime")
+			return
+		}
+	}
+	thread := ""
+	if m := threadIs.FindStringSubmatch(filter); m != nil {
+		thread = m[1]
+	}
+	var all []*chat.Message
+	for _, m := range f.messages {
+		created, _ := time.Parse(time.RFC3339Nano, m.CreateTime)
+		if spaceOf(m.Name) != space || (!after.IsZero() && !created.After(after)) ||
+			(thread != "" && m.Thread.Name != thread) {
+			continue
+		}
+		all = append(all, m)
+	}
+	switch q.Get("orderBy") {
+	case "createTime desc":
+		slices.Reverse(all)
+	case "", "createTime asc", "createTime":
+	default:
+		replyError(w, http.StatusBadRequest, "bad orderBy")
+		return
+	}
+	msgs, next, ok := page(f, w, r, all)
+	if ok {
+		reply(w, chat.ListMessagesResponse{Messages: msgs, NextPageToken: next})
+	}
+}
+
+func (f *fakeChat) getMessage(w http.ResponseWriter, r *http.Request) {
+	name := "spaces/" + r.PathValue("space") + "/messages/" + r.PathValue("message")
+	for _, m := range f.messages {
+		if m.Name == name {
+			reply(w, m)
+			return
+		}
+	}
+	replyError(w, http.StatusNotFound, "message not found")
 }
 
 type testRun struct {
