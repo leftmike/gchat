@@ -28,6 +28,7 @@ type fakeChat struct {
 	members map[string][]string
 
 	membersFail map[string]bool
+	roles       map[string]string
 	messages    []*chat.Message
 	pageMax     int
 	failNext    int
@@ -65,7 +66,7 @@ func newFakeChat(t *testing.T) *fakeChat {
 			"users/9": {Name: "users/9", Type: "BOT"},
 		},
 		members: map[string][]string{
-			"spaces/AAAAteam001": {"users/1", "users/2", "users/3"},
+			"spaces/AAAAteam001": {"users/1", "users/2", "users/3", "groups/eng"},
 			"spaces/AAAAdm00001": {"users/2", "users/1", "users/9"},
 			"spaces/AAAAgroup01": {"users/1", "users/2", "users/3", "users/4", "users/5", "users/6", "users/9"},
 		},
@@ -91,6 +92,11 @@ func newFakeChat(t *testing.T) *fakeChat {
 		mux.ServeHTTP(w, r)
 	})
 
+	f.roles = map[string]string{
+		"spaces/AAAAteam001 users/3":    "ROLE_MANAGER",
+		"spaces/AAAAteam001 users/2":    "ROLE_ASSISTANT_MANAGER",
+		"spaces/AAAAteam001 groups/eng": "MEMBERSHIP_ROLE_UNSPECIFIED",
+	}
 	msg := func(id, sender string, min int, text string, reply bool) *chat.Message {
 		thread, _, _ := strings.Cut(id, ".")
 		return &chat.Message{Name: "spaces/AAAAteam001/messages/" + id, Sender: f.users[sender],
@@ -224,8 +230,18 @@ func (f *fakeChat) listMembers(w http.ResponseWriter, r *http.Request) {
 	}
 	var all []*chat.Membership
 	for _, id := range f.members[space] {
-		all = append(all, &chat.Membership{Name: space + "/members/" + strings.TrimPrefix(id, "users/"),
-			Member: f.users[id], State: "JOINED", Role: "ROLE_MEMBER"})
+		role, ok := f.roles[space+" "+id]
+		if !ok {
+			role = "ROLE_MEMBER"
+		}
+		m := &chat.Membership{Name: space + "/members/" + strings.TrimPrefix(id, "users/"),
+			State: "JOINED", Role: role}
+		if strings.HasPrefix(id, "groups/") {
+			m.GroupMember = &chat.Group{Name: id}
+		} else {
+			m.Member = f.users[id]
+		}
+		all = append(all, m)
 	}
 	ms, next, ok := page(f, w, r, all)
 	if ok {

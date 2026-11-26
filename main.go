@@ -51,12 +51,14 @@ var (
 	verbose bool
 
 	cmds = map[string]cmd{
-		"auth":   {setup: authCmd, help: "authorize gchat with Google, or revoke the saved token"},
-		"config": {setup: noFlags(showConfig), help: "show the effective configuration"},
-		"get":    {setup: noFlags(get), help: "show messages by id"},
-		"help":   {help: "show this help"},
-		"list":   {setup: listCmd, help: "list the messages in a space, oldest first"},
-		"spaces": {setup: spacesCmd, help: "list spaces, group chats, and direct messages"},
+		"auth":    {setup: authCmd, help: "authorize gchat with Google, or revoke the saved token"},
+		"config":  {setup: noFlags(showConfig), help: "show the effective configuration"},
+		"get":     {setup: noFlags(get), help: "show messages by id"},
+		"help":    {help: "show this help"},
+		"list":    {setup: listCmd, help: "list the messages in a space, oldest first"},
+		"members": {setup: noFlags(members), help: "list the members of a space"},
+		"spaces":  {setup: spacesCmd, help: "list spaces, group chats, and direct messages"},
+		"thread":  {setup: noFlags(thread), help: "show every message in a message's thread"},
 	}
 )
 

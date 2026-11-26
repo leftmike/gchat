@@ -51,6 +51,8 @@ func getMessage(ctx context.Context, svc *chat.Service, name string) (*chat.Mess
 	return m, err
 }
 
+var zeroTime time.Time
+
 func parseSince(s string, now time.Time) (time.Time, error) {
 	units := map[byte]time.Duration{'m': time.Minute, 'h': time.Hour, 'd': 24 * time.Hour,
 		'w': 7 * 24 * time.Hour}

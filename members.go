@@ -1,8 +1,10 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -96,4 +98,84 @@ func (c *cache) spaceLabel(sp *chat.Space) string {
 		return fmt.Sprintf("%s +%d", strings.Join(names[:maxLabelNames], ", "), len(names)-maxLabelNames)
 	}
 	return strings.Join(names, ", ")
+}
+
+var roleNames = map[string]string{
+	"ROLE_MANAGER":           "owner",
+	"ROLE_ASSISTANT_MANAGER": "manager",
+	"ROLE_MEMBER":            "member",
+}
+
+var roleOrder = map[string]int{"ROLE_MANAGER": 0, "ROLE_ASSISTANT_MANAGER": 1, "ROLE_MEMBER": 2}
+
+func roleName(r string) string {
+	if name, ok := roleNames[r]; ok {
+		return name
+	}
+	return "-"
+}
+
+func (c *cache) memberName(m *chat.Membership) string {
+	if m.Member != nil {
+		return c.senderName(m.Member)
+	}
+	if m.GroupMember != nil {
+		return m.GroupMember.Name
+	}
+	return ""
+}
+
+func memberDetail(m *chat.Membership) string {
+	switch {
+	case m.GroupMember != nil:
+		return "(google group)"
+	case m.Member == nil:
+		return ""
+	case m.Member.Type == "BOT":
+		return "(app)"
+	}
+	return m.Member.Email
+}
+
+func members(ctx context.Context, cfg *config, args []string) error {
+	if len(args) != 1 {
+		return usageError("<space>")
+	}
+	svc, err := cfg.chatService(ctx)
+	if err != nil {
+		return err
+	}
+	sp, err := (&spaceResolver{svc: svc}).resolve(ctx, args[0])
+	if err != nil {
+		return err
+	}
+	ms, err := listMembers(ctx, svc, sp.Name)
+	if err != nil {
+		return err
+	}
+	c, err := cfg.loadCache(ctx)
+	if err != nil {
+		return err
+	}
+	defer cfg.saveCache()
+	c.setMembers(sp.Name, ms, time.Now())
+
+	slices.SortStableFunc(ms, func(a, b *chat.Membership) int {
+		ra, oka := roleOrder[a.Role]
+		rb, okb := roleOrder[b.Role]
+		if !oka {
+			ra = len(roleOrder)
+		}
+		if !okb {
+			rb = len(roleOrder)
+		}
+		return cmp.Or(cmp.Compare(ra, rb),
+			cmp.Compare(strings.ToLower(c.memberName(a)), strings.ToLower(c.memberName(b))))
+	})
+	for _, m := range ms {
+		fmt.Fprintln(cfg.out, strings.TrimRight(fmt.Sprintf("%-7s  %-24s  %s", roleName(m.Role),
+			c.memberName(m), memberDetail(m)), " "))
+	}
+	fmt.Fprintf(cfg.out, "%d members\n", len(ms))
+	return nil
 }
