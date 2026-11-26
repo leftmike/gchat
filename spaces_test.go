@@ -18,30 +18,30 @@ func TestSpacesCommand(t *testing.T) {
 
 	got := tr.ok("spaces")
 	want := lines(
-		"AAAAproj001  space  "+when(3)+"  Project X",
-		"AAAAteam001  space  "+when(2)+"  Team",
-		"AAAAdm00001  dm     "+when(1)+"  (direct message)",
-		"AAAAgroup01  group  "+when(0)+"  (group chat)",
-		"AAAAproj002  space                    Project Y",
+		"AAAAproj001  space   "+when(3)+"  Project X",
+		"AAAAteam001  space   "+when(2)+"  Team",
+		"AAAAdm00001  direct  "+when(1)+"  Alice Smith",
+		"AAAAgroup01  group   "+when(0)+"  Alice Smith, Bob Jones, Carol White +2",
+		"AAAAproj002  space                     Project Y",
 		"5 spaces")
 	if got != want {
 		t.Errorf("spaces:\ngot\n%s\nwant\n%s", got, want)
 	}
 
-	got = tr.ok("spaces", "-type", "group,dm")
+	got = tr.ok("spaces", "-type", "group,direct")
 	want = lines(
-		"AAAAdm00001  dm     "+when(1)+"  (direct message)",
-		"AAAAgroup01  group  "+when(0)+"  (group chat)",
+		"AAAAdm00001  direct  "+when(1)+"  Alice Smith",
+		"AAAAgroup01  group   "+when(0)+"  Alice Smith, Bob Jones, Carol White +2",
 		"2 spaces")
 	if got != want {
-		t.Errorf("spaces -type group,dm:\ngot\n%s\nwant\n%s", got, want)
+		t.Errorf("spaces -type group,direct:\ngot\n%s\nwant\n%s", got, want)
 	}
 
 	got = tr.ok("spaces", "team", "alice@example.com", "spaces/AAAAproj002", "AAAAteam001")
 	want = lines(
-		"AAAAteam001  space  "+when(2)+"  Team",
-		"AAAAdm00001  dm     "+when(1)+"  (direct message)",
-		"AAAAproj002  space                    Project Y",
+		"AAAAteam001  space   "+when(2)+"  Team",
+		"AAAAdm00001  direct  "+when(1)+"  Alice Smith",
+		"AAAAproj002  space                     Project Y",
 		"3 spaces")
 	if got != want {
 		t.Errorf("spaces by name:\ngot\n%s\nwant\n%s", got, want)
@@ -60,14 +60,15 @@ func TestSpacesCommand(t *testing.T) {
 func TestSpaceResolveCalls(t *testing.T) {
 	tr := newTestRun(t)
 	tr.ok("spaces", "team", "project x")
-	want := []string{"GET /v1/spaces"}
+	want := []string{"GET /v1/spaces", "GET /userinfo"}
 	if strings.Join(tr.f.calls, ",") != strings.Join(want, ",") {
 		t.Errorf("resolve names: got calls %v, want %v", tr.f.calls, want)
 	}
 
 	tr.f.calls = nil
 	tr.ok("spaces", "AAAAgroup01", "spaces/AAAAteam001")
-	want = []string{"GET /v1/spaces/AAAAgroup01", "GET /v1/spaces/AAAAteam001"}
+	want = []string{"GET /v1/spaces/AAAAgroup01", "GET /v1/spaces/AAAAteam001",
+		"GET /v1/spaces/AAAAgroup01/members"}
 	if strings.Join(tr.f.calls, ",") != strings.Join(want, ",") {
 		t.Errorf("resolve ids: got calls %v, want %v", tr.f.calls, want)
 	}

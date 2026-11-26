@@ -15,27 +15,34 @@ import (
 )
 
 var spaceTypes = map[string]string{
-	"space": "SPACE",
-	"group": "GROUP_CHAT",
-	"dm":    "DIRECT_MESSAGE",
+	"space":  "SPACE",
+	"group":  "GROUP_CHAT",
+	"direct": "DIRECT_MESSAGE",
+	"dm":     "DIRECT_MESSAGE",
+}
+
+var spaceTypeNames = map[string]string{
+	"SPACE":          "space",
+	"GROUP_CHAT":     "group",
+	"DIRECT_MESSAGE": "direct",
 }
 
 func spaceTypeName(t string) string {
-	for k, v := range spaceTypes {
-		if v == t {
-			return k
-		}
+	if name, ok := spaceTypeNames[t]; ok {
+		return name
 	}
 	return strings.ToLower(t)
 }
 
 type spacesOptions struct {
 	types string
+	max   int
 }
 
 func spacesCmd(fs *flag.FlagSet) runFunc {
 	var opts spacesOptions
-	fs.StringVar(&opts.types, "type", "", "only list spaces of these types: space, group, dm (comma separated)")
+	fs.IntVar(&opts.max, "n", 50, "maximum number of spaces to list; 0 for no limit")
+	fs.StringVar(&opts.types, "type", "", "only list spaces of these types: space, group, direct or dm (comma separated)")
 	return func(ctx context.Context, cfg *config, args []string) error {
 		return spaces(ctx, cfg, opts, args)
 	}
@@ -49,7 +56,7 @@ func spaceFilter(types string) (string, error) {
 	for _, t := range strings.Split(types, ",") {
 		st, ok := spaceTypes[strings.ToLower(strings.TrimSpace(t))]
 		if !ok {
-			return "", fmt.Errorf("unknown space type: %s (want space, group, or dm)", t)
+			return "", fmt.Errorf("unknown space type: %s (want space, group, direct, or dm)", t)
 		}
 		terms = append(terms, fmt.Sprintf("spaceType = %q", st))
 	}
@@ -85,7 +92,7 @@ func spaceID(name string) string {
 	return strings.TrimPrefix(name, "spaces/")
 }
 
-func spaceLabel(sp *chat.Space) string {
+func defaultSpaceLabel(sp *chat.Space) string {
 	if sp.DisplayName != "" {
 		return sp.DisplayName
 	}
@@ -106,9 +113,9 @@ func localTime(ts string) string {
 	return t.Local().Format("2006-01-02 15:04")
 }
 
-func formatSpaceLine(sp *chat.Space) string {
-	return fmt.Sprintf("%-11s  %-5s  %-16s  %s", spaceID(sp.Name), spaceTypeName(sp.SpaceType),
-		localTime(sp.LastActiveTime), spaceLabel(sp))
+func formatSpaceLine(sp *chat.Space, label string) string {
+	return fmt.Sprintf("%-11s  %-6s  %-16s  %s", spaceID(sp.Name), spaceTypeName(sp.SpaceType),
+		localTime(sp.LastActiveTime), label)
 }
 
 func sortSpaces(spaces []*chat.Space) {
@@ -237,6 +244,9 @@ func resolveSpaces(ctx context.Context, svc *chat.Service, args []string) ([]*ch
 }
 
 func spaces(ctx context.Context, cfg *config, opts spacesOptions, args []string) error {
+	if opts.max < 0 {
+		return errors.New("-n must be 0 or more")
+	}
 	filter, err := spaceFilter(opts.types)
 	if err != nil {
 		return err
@@ -250,18 +260,34 @@ func spaces(ctx context.Context, cfg *config, opts spacesOptions, args []string)
 	}
 
 	var list []*chat.Space
+	more := false
 	if len(args) > 0 {
 		list, err = resolveSpaces(ctx, svc, args)
 	} else {
 		list, err = listSpaces(ctx, svc, filter)
 		sortSpaces(list)
+		if opts.max > 0 && len(list) > opts.max {
+			list, more = list[:opts.max], true
+		}
 	}
 	if err != nil {
 		return err
 	}
-	for _, sp := range list {
-		fmt.Fprintln(cfg.out, formatSpaceLine(sp))
+
+	c, err := cfg.loadCache(ctx)
+	if err != nil {
+		return err
 	}
-	fmt.Fprintf(cfg.out, "%d spaces\n", len(list))
-	return nil
+	defer cfg.saveCache()
+	fetchErr := fetchMembers(ctx, cfg, svc, c, list)
+
+	for _, sp := range list {
+		fmt.Fprintln(cfg.out, formatSpaceLine(sp, c.spaceLabel(sp)))
+	}
+	fmt.Fprintf(cfg.out, "%d spaces", len(list))
+	if more {
+		fmt.Fprint(cfg.out, " (more; use -n to see more)")
+	}
+	fmt.Fprintln(cfg.out)
+	return fetchErr
 }

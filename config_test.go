@@ -38,14 +38,15 @@ func TestLoadConfig(t *testing.T) {
 	}
 	dir := filepath.Join(home, ".gchat")
 	if cfg.Credentials != filepath.Join(dir, "credentials.json") ||
-		cfg.Token != filepath.Join(dir, "token.json") || !slices.Equal(args, []string{"a", "b"}) {
+		cfg.Token != filepath.Join(dir, "token.json") || cfg.Cache != filepath.Join(dir, "cache.json") ||
+		!slices.Equal(args, []string{"a", "b"}) {
 		t.Errorf("defaults: got %+v, %v", cfg, args)
 	}
 
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	hcl := "credentials = \"~/creds.json\"\ntoken = \"/tmp/tok.json\"\n"
+	hcl := "credentials = \"~/creds.json\"\ntoken = \"/tmp/tok.json\"\ncache = \"~/c.json\"\n"
 	if err := os.WriteFile(filepath.Join(dir, "gchat.hcl"), []byte(hcl), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +55,8 @@ func TestLoadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Credentials != filepath.Join(home, "creds.json") || cfg.Token != "flag.json" {
+	if cfg.Credentials != filepath.Join(home, "creds.json") || cfg.Token != "flag.json" ||
+		cfg.Cache != filepath.Join(home, "c.json") {
 		t.Errorf("file and flags: got %+v", cfg)
 	}
 
@@ -109,11 +111,11 @@ func TestReadConfigError(t *testing.T) {
 
 func TestShowConfig(t *testing.T) {
 	var out bytes.Buffer
-	cfg := &config{Credentials: "/c.json", Token: "/t.json", out: &out}
+	cfg := &config{Credentials: "/c.json", Token: "/t.json", Cache: "/cache.json", out: &out}
 	if err := showConfig(t.Context(), cfg, nil); err != nil {
 		t.Fatal(err)
 	}
-	want := "credentials: /c.json\ntoken:       /t.json\n"
+	want := "credentials: /c.json\ntoken:       /t.json\ncache:       /cache.json\n"
 	if out.String() != want {
 		t.Errorf("showConfig: got %q, want %q", out.String(), want)
 	}

@@ -22,10 +22,7 @@ import (
 	"google.golang.org/api/option"
 )
 
-const (
-	directoryReadonlyScope = "https://www.googleapis.com/auth/directory.readonly"
-	userinfoEmailScope     = "https://www.googleapis.com/auth/userinfo.email"
-)
+const userinfoEmailScope = "https://www.googleapis.com/auth/userinfo.email"
 
 var (
 	scopes = []string{
@@ -34,7 +31,6 @@ var (
 		chat.ChatMembershipsReadonlyScope,
 		chat.ChatMessagesReactionsScope,
 		chat.ChatUsersReadstateScope,
-		directoryReadonlyScope,
 		userinfoEmailScope,
 	}
 	userinfoURL = "https://openidconnect.googleapis.com/v1/userinfo"

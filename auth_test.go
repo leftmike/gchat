@@ -88,7 +88,7 @@ func TestOAuthScopes(t *testing.T) {
 	}
 	got := strings.Join(oc.Scopes, " ")
 	for _, s := range []string{"chat.spaces.readonly", "chat.messages", "chat.memberships.readonly",
-		"chat.messages.reactions", "chat.users.readstate", "directory.readonly", "userinfo.email"} {
+		"chat.messages.reactions", "chat.users.readstate", "userinfo.email"} {
 		if !strings.Contains(got, "/auth/"+s) {
 			t.Errorf("scopes: missing %s in %s", s, got)
 		}

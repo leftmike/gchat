@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,15 +18,19 @@ import (
 )
 
 type fakeChat struct {
-	mu       sync.Mutex
-	email    string
-	spaces   []*chat.Space
-	dms      map[string]string
-	pageMax  int
-	failNext int
-	calls    []string
-	svc      *chat.Service
-	client   *http.Client
+	mu      sync.Mutex
+	email   string
+	spaces  []*chat.Space
+	dms     map[string]string
+	users   map[string]*chat.User
+	members map[string][]string
+
+	membersFail map[string]bool
+	pageMax     int
+	failNext    int
+	calls       []string
+	svc         *chat.Service
+	client      *http.Client
 }
 
 func newFakeChat(t *testing.T) *fakeChat {
@@ -47,6 +52,20 @@ func newFakeChat(t *testing.T) *fakeChat {
 				LastActiveTime: "1970-01-01T00:00:00Z"},
 		},
 		dms: map[string]string{"alice@example.com": "spaces/AAAAdm00001"},
+		users: map[string]*chat.User{
+			"users/1": {Name: "users/1", DisplayName: "Me Myself", Email: "me@example.com", Type: "HUMAN"},
+			"users/2": {Name: "users/2", DisplayName: "Alice Smith", Email: "alice@example.com", Type: "HUMAN"},
+			"users/3": {Name: "users/3", DisplayName: "Bob Jones", Email: "bob@example.com", Type: "HUMAN"},
+			"users/4": {Name: "users/4", DisplayName: "Carol White", Email: "carol@example.com", Type: "HUMAN"},
+			"users/5": {Name: "users/5", DisplayName: "Dave Brown", Email: "dave@example.com", Type: "HUMAN"},
+			"users/6": {Name: "users/6", Type: "HUMAN"},
+			"users/9": {Name: "users/9", Type: "BOT"},
+		},
+		members: map[string][]string{
+			"spaces/AAAAteam001": {"users/1", "users/2", "users/3"},
+			"spaces/AAAAdm00001": {"users/2", "users/1", "users/9"},
+			"spaces/AAAAgroup01": {"users/1", "users/2", "users/3", "users/4", "users/5", "users/6", "users/9"},
+		},
 	}
 
 	mux := http.NewServeMux()
@@ -54,6 +73,7 @@ func newFakeChat(t *testing.T) *fakeChat {
 	mux.HandleFunc("GET /v1/spaces", f.listSpaces)
 	mux.HandleFunc("GET /v1/spaces/{space}", f.getSpace)
 	mux.HandleFunc("GET /v1/spaces:findDirectMessage", f.findDirectMessage)
+	mux.HandleFunc("GET /v1/spaces/{space}/members", f.listMembers)
 	f.svc, f.client = newTestService(t, func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -169,20 +189,40 @@ func (f *fakeChat) findDirectMessage(w http.ResponseWriter, r *http.Request) {
 	reply(w, f.space(name))
 }
 
+func (f *fakeChat) listMembers(w http.ResponseWriter, r *http.Request) {
+	space := "spaces/" + r.PathValue("space")
+	if f.space(space) == nil || f.membersFail[space] {
+		replyError(w, http.StatusForbidden, "permission denied")
+		return
+	}
+	var all []*chat.Membership
+	for _, id := range f.members[space] {
+		all = append(all, &chat.Membership{Name: space + "/members/" + strings.TrimPrefix(id, "users/"),
+			Member: f.users[id], State: "JOINED", Role: "ROLE_MEMBER"})
+	}
+	ms, next, ok := page(f, w, r, all)
+	if ok {
+		reply(w, chat.ListMembershipsResponse{Memberships: ms, NextPageToken: next})
+	}
+}
+
 type testRun struct {
 	t     *testing.T
 	f     *fakeChat
 	token string
+	cache string
 }
 
 func newTestRun(t *testing.T) *testRun {
-	return &testRun{t: t, f: newFakeChat(t), token: "/home/me/.gchat/token.json"}
+	return &testRun{t: t, f: newFakeChat(t), token: "/home/me/.gchat/token.json",
+		cache: filepath.Join(t.TempDir(), "cache.json")}
 }
 
 func (tr *testRun) config(out, errOut *bytes.Buffer, name string) *config {
 	return &config{
 		Credentials: "/home/me/.gchat/credentials.json",
 		Token:       tr.token,
+		Cache:       tr.cache,
 		client:      tr.f.client,
 		chat:        tr.f.svc,
 		out:         out,
@@ -238,7 +278,8 @@ func lines(s ...string) string {
 func TestConfigCommand(t *testing.T) {
 	tr := newTestRun(t)
 	got := tr.ok("config")
-	want := lines("credentials: /home/me/.gchat/credentials.json", "token:       /home/me/.gchat/token.json")
+	want := lines("credentials: /home/me/.gchat/credentials.json", "token:       /home/me/.gchat/token.json",
+		"cache:       "+tr.cache)
 	if got != want {
 		t.Errorf("config: got %q, want %q", got, want)
 	}

@@ -20,9 +20,11 @@ import (
 type config struct {
 	Credentials string `hcl:"credentials,optional"`
 	Token       string `hcl:"token,optional"`
+	Cache       string `hcl:"cache,optional"`
 
 	client  *http.Client
 	chat    *chat.Service
+	cache   *cache
 	out     io.Writer
 	errOut  io.Writer
 	name    string
@@ -84,6 +86,7 @@ func loadConfig(fs *flag.FlagSet, args []string) (*config, []string, error) {
 	fs.StringVar(&configFile, "config", "", "HCL config file")
 	fs.String("credentials", "", "OAuth client credentials file")
 	fs.String("token", "", "OAuth token file")
+	fs.String("cache", "", "cache file for member names")
 	fs.Parse(args)
 
 	var cfg *config
@@ -109,6 +112,8 @@ func loadConfig(fs *flag.FlagSet, args []string) (*config, []string, error) {
 			cfg.Credentials = f.Value.String()
 		case "token":
 			cfg.Token = f.Value.String()
+		case "cache":
+			cfg.Cache = f.Value.String()
 		}
 	})
 
@@ -118,8 +123,12 @@ func loadConfig(fs *flag.FlagSet, args []string) (*config, []string, error) {
 	if cfg.Token == "" {
 		cfg.Token = filepath.Join(configDir(), "token.json")
 	}
+	if cfg.Cache == "" {
+		cfg.Cache = filepath.Join(configDir(), "cache.json")
+	}
 	cfg.Credentials = expandHome(cfg.Credentials)
 	cfg.Token = expandHome(cfg.Token)
+	cfg.Cache = expandHome(cfg.Cache)
 
 	return cfg, fs.Args(), nil
 }
@@ -130,6 +139,7 @@ func showConfig(ctx context.Context, cfg *config, args []string) error {
 	}
 	fmt.Fprintf(cfg.out, "credentials: %s\n", cfg.Credentials)
 	fmt.Fprintf(cfg.out, "token:       %s\n", cfg.Token)
+	fmt.Fprintf(cfg.out, "cache:       %s\n", cfg.Cache)
 	return nil
 }
 
